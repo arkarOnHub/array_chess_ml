@@ -1,0 +1,32 @@
+name: raspberryturk
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9        # TensorFlow 2.x works well with Python 3.9
+  - numpy=1.21        # Match with TensorFlow compatibility
+  - scipy
+  - scikit-learn
+  - scikit-image
+  - lightgbm
+  - joblib
+  - fastapi
+  - uvicorn
+  - opencv            # Specify version if needed, e.g., opencv=4.5.5
+  - mkl
+  - hdf5
+  - openssl
+  - pyreadline
+  - setuptools
+  - sqlite
+  - tbb
+  - tk
+  - wheel
+  - zlib
+  - jupyter           # Includes Jupyter Notebook
+  - tensorflow=2.9    # Adjust version as needed
+  - matplotlib 
+  - pip               # Ensure pip is installed for extra dependencies
+  - pip:
+      - python-chess
+      - stockfish

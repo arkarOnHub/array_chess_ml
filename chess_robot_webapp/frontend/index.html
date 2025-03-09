@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Webcam with Calibration</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        #video-feed {
+            width: 30%;
+            height: auto;
+            border: 1px solid #000;
+            object-fit: contain;
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        #fen-result {
+            margin-top: 20px;
+            font-size: 18px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live Webcam with Calibration</h1>
+    <img id="video-feed" src="/video_feed" alt="Live Webcam Feed">
+    
+    <div class="button-container">
+        <button onclick="startCalibration()">Start Calibration</button>
+        <button onclick="restartCalibration()">Restart Calibration</button>
+        <button onclick="toggleFenExtraction()">Start Prediction</button>
+    </div>
+
+    <p id="fen-result">FEN: </p>
+
+    <script>
+        async function startCalibration() {
+            const response = await fetch("/start_calibration", { method: "POST" });
+            const result = await response.json();
+            alert(result.message);
+        }
+
+        async function restartCalibration() {
+            const response = await fetch("/start_calibration", { method: "POST" });
+            const result = await response.json();
+            alert(result.message);
+        }
+
+        async function toggleFenExtraction() {
+            const response = await fetch("/toggle_fen_extraction", { method: "POST" });
+            const result = await response.json();
+            alert(result.message);
+        }
+
+        // Fetch FEN result periodically
+        setInterval(async () => {
+            const response = await fetch("/get_fen");
+            const result = await response.json();
+            document.getElementById("fen-result").innerText = `FEN: ${result.fen}`;
+        }, 2000);
+    </script>
+</body>
+</html>

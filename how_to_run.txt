@@ -1,0 +1,11 @@
+For Augmentation,
+Go inside augment_images.ipynb and run the code (you can change two variables inside to adjust)
+
+For Data preparation,
+Go inside prepare_here.ipynb and export squares and labels folders
+
+For SVM and Rdf Model Training,
+Go inside model_training.ipynb
+
+For Lightgbm model training,
+Go inside lightgbm_model.ipynb

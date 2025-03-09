@@ -1,0 +1,21 @@
+# Force LF for Jupyter notebooks (important to avoid CRLF issues across OS)
+*.ipynb text eol=lf
+
+# Python scripts should also use LF (recommended in Python community)
+*.py text eol=lf
+
+# Shell scripts (if any) should use LF (for compatibility with Unix systems)
+*.sh text eol=lf
+
+# Text files can follow OS defaults if you want
+*.txt text
+
+# CSV files (like your datasets) should also use LF
+*.csv text eol=lf
+
+# Optional: force images/binary files to be treated as binary (no line ending changes)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pkl binary
