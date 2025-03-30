@@ -7,11 +7,17 @@ import os
 import asyncio
 import joblib
 from skimage.feature import hog
+import collections
 
 app = FastAPI()
 
 # Global variables
 calibrated_corners = None
+prev_gray_frame = None  # Global variable to track previous frame
+# Global variables
+motion_history = collections.deque(maxlen=10)  # Store last 5 motion scores
+stable_frame_count = 0  # Track how many stable frames in a row
+
 output_folder = "cropped_frames"
 fen_result = "FEN extraction inactive"
 fen_extraction_active = False  # Control FEN extraction
@@ -55,12 +61,46 @@ def extract_hsv_features(image, bins=16):
     return np.concatenate((h_hist, s_hist, v_hist))
 
 
-# Predict FEN and overlay using new logic
+def is_board_stable(frame, threshold=1.0, stable_threshold=3):
+    global prev_gray_frame, stable_frame_count
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    if prev_gray_frame is None:
+        prev_gray_frame = gray
+        return False
+
+    flow = cv2.calcOpticalFlowFarneback(
+        prev_gray_frame, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0
+    )
+    motion_score = np.mean(np.linalg.norm(flow, axis=2))  # Average motion
+
+    if motion_score > threshold:
+        stable_frame_count = 0
+        return False
+
+    stable_frame_count += 1
+
+    if stable_frame_count >= stable_threshold:
+        prev_gray_frame = gray
+        stable_frame_count = 0
+        return True
+
+    return False
+
+
 def predict_fen_and_overlay(frame):
     global fen_extraction_active, fen_result
 
     if not fen_extraction_active:
         return frame, None
+
+    # Check if board is stable before making a prediction
+    if not is_board_stable(frame):
+        print("Motion detected! Skipping FEN extraction...")
+        return frame, None
+
+    print("Board stable! Proceeding with FEN extraction...")
 
     grayscale_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     grayscale_image = cv2.resize(grayscale_image, (480, 480))
