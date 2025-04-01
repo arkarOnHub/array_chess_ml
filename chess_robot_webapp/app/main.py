@@ -8,23 +8,25 @@ import asyncio
 import joblib
 from skimage.feature import hog
 import collections
+import chess  # New import
 
 app = FastAPI()
 
 # Global variables
 calibrated_corners = None
-prev_gray_frame = None  # Global variable to track previous frame
-# Global variables
-motion_history = collections.deque(maxlen=10)  # Store last 5 motion scores
-stable_frame_count = 0  # Track how many stable frames in a row
-
+# New global variable to track last extracted BW FEN
+last_bw_fen = None
+prev_gray_frame = None
+motion_history = collections.deque(maxlen=10)
+stable_frame_count = 0
 output_folder = "cropped_frames"
 fen_result = "FEN extraction inactive"
-fen_extraction_active = False  # Control FEN extraction
+fen_extraction_active = False
 os.makedirs(output_folder, exist_ok=True)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Initialize capture globally
-fen_extraction_active = False  # Control FEN extraction
+# New global variables for FEN conversion
+previous_full_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"  # Standard starting position
 
 # Load models
 hog_model = joblib.load(
@@ -35,7 +37,74 @@ hsv_model = joblib.load(
 )
 
 
-# Feature extraction functions (from your new logic)
+# New FEN conversion functions
+def parse_bw_to_board(bw_board):
+    board = []
+    for row in bw_board.split("/"):
+        parsed_row = []
+        for char in row:
+            if char == "b":
+                parsed_row.append("b")
+            elif char == "w":
+                parsed_row.append("w")
+            else:
+                parsed_row.extend([""] * int(char))
+        board.append(parsed_row)
+    return board
+
+
+def parse_fen_to_board(fen):
+    fen_board = fen.split(" ")[0]
+    board = []
+    for row in fen_board.split("/"):
+        parsed_row = []
+        for char in row:
+            if char.isdigit():
+                parsed_row.extend([""] * int(char))
+            else:
+                parsed_row.append(char.lower())
+        board.append(parsed_row)
+    return board
+
+
+def compare_boards(previous_board, current_board):
+    from_square = None
+    to_square = None
+    for rank in range(8):
+        for file in range(8):
+            prev_piece = previous_board[rank][file]
+            curr_piece = current_board[rank][file]
+            if prev_piece and not curr_piece:
+                from_square = chess.square(file, 7 - rank)
+            if not prev_piece and curr_piece:
+                to_square = chess.square(file, 7 - rank)
+    return from_square, to_square
+
+
+def update_fen_from_bw(bw_fen):
+    global previous_full_fen
+    try:
+        previous_board = parse_fen_to_board(previous_full_fen)
+        current_board = parse_bw_to_board(bw_fen)
+
+        from_square, to_square = compare_boards(previous_board, current_board)
+        if from_square is None or to_square is None:
+            return previous_full_fen
+
+        move = chess.Move(from_square, to_square)
+        board = chess.Board(previous_full_fen)
+
+        if move in board.legal_moves:
+            board.push(move)
+            previous_full_fen = board.fen()
+        else:
+            print(f"Illegal move detected: {move.uci()}")
+    except Exception as e:
+        print(f"Error updating FEN: {e}")
+    return previous_full_fen
+
+
+# Existing functions remain exactly the same
 def extract_hog_features(image):
     image = cv2.resize(image, (60, 60))
     fd, _ = hog(
@@ -53,126 +122,33 @@ def extract_hsv_features(image, bins=16):
     h_hist = cv2.calcHist([hsv_image], [0], None, [bins], [0, 180])
     s_hist = cv2.calcHist([hsv_image], [1], None, [bins], [0, 256])
     v_hist = cv2.calcHist([hsv_image], [2], None, [bins], [0, 256])
-
     h_hist = cv2.normalize(h_hist, h_hist).flatten()
     s_hist = cv2.normalize(s_hist, s_hist).flatten()
     v_hist = cv2.normalize(v_hist, v_hist).flatten()
-
     return np.concatenate((h_hist, s_hist, v_hist))
 
 
 def is_board_stable(frame, threshold=1.0, stable_threshold=3):
     global prev_gray_frame, stable_frame_count
-
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
     if prev_gray_frame is None:
         prev_gray_frame = gray
         return False
-
     flow = cv2.calcOpticalFlowFarneback(
         prev_gray_frame, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0
     )
-    motion_score = np.mean(np.linalg.norm(flow, axis=2))  # Average motion
-
+    motion_score = np.mean(np.linalg.norm(flow, axis=2))
     if motion_score > threshold:
         stable_frame_count = 0
         return False
-
     stable_frame_count += 1
-
     if stable_frame_count >= stable_threshold:
         prev_gray_frame = gray
         stable_frame_count = 0
         return True
-
     return False
 
 
-def predict_fen_and_overlay(frame):
-    global fen_extraction_active, fen_result
-
-    if not fen_extraction_active:
-        return frame, None
-
-    # Check if board is stable before making a prediction
-    if not is_board_stable(frame):
-        print("Motion detected! Skipping FEN extraction...")
-        return frame, None
-
-    print("Board stable! Proceeding with FEN extraction...")
-
-    grayscale_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    grayscale_image = cv2.resize(grayscale_image, (480, 480))
-    color_image = cv2.resize(frame, (480, 480))
-    step = 60
-
-    predictions = []
-
-    for row in range(8):
-        row_data = []
-        for col in range(8):
-            square_gray = grayscale_image[
-                row * step : (row + 1) * step, col * step : (col + 1) * step
-            ]
-            square_color = color_image[
-                row * step : (row + 1) * step, col * step : (col + 1) * step
-            ]
-
-            # HOG feature extraction and occupancy prediction
-            hog_features = extract_hog_features(square_gray)
-            is_occupied = hog_model.predict([hog_features])[
-                0
-            ]  # 1 = occupied, 0 = empty
-
-            if is_occupied == 0:
-                row_data.append("1")
-                continue
-
-            # HSV feature extraction and piece color prediction
-            hsv_features = extract_hsv_features(square_color)
-            piece_color = hsv_model.predict([hsv_features])[0]  # 1 = white, -1 = black
-
-            label = "w" if piece_color == 1 else "b"
-            row_data.append(label)
-
-            text_color = (255, 255, 255) if label == "w" else (0, 0, 0)
-            cv2.putText(
-                color_image,
-                label,
-                (col * step + 20, row * step + 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                text_color,
-                2,
-                cv2.LINE_AA,
-            )
-
-        # Convert row to FEN format
-        fen_row = "".join(row_data)
-        compact_fen_row = ""
-        count = 0
-        for char in fen_row:
-            if char == "1":
-                count += 1
-            else:
-                if count > 0:
-                    compact_fen_row += str(count)
-                    count = 0
-                compact_fen_row += char
-        if count > 0:
-            compact_fen_row += str(count)
-
-        predictions.append(compact_fen_row)
-
-    # Join rows into final FEN string
-    fen_result = "/".join(predictions)
-    print("Generated FEN:", fen_result)
-
-    return color_image, fen_result
-
-
-# Other functions remain the same (calibration, cropping, etc.)
 def get_chessboard_corners(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -231,7 +207,6 @@ def crop_using_calibrated_corners(frame):
     return cv2.warpPerspective(frame, M, (size, size))
 
 
-# Video feed generator
 def generate_frames():
     while True:
         ret, frame = cap.read()
@@ -249,6 +224,81 @@ def generate_frames():
             print(f"Error processing frame: {e}")
 
 
+def predict_fen_and_overlay(frame):
+    global fen_extraction_active, fen_result, previous_full_fen, last_bw_fen
+
+    if not fen_extraction_active:
+        return frame, None
+
+    if not is_board_stable(frame):
+        print("Motion detected! Skipping BW FEN extraction...")
+        return frame, None
+
+    print("Board stable! Proceeding with BW FEN extraction...")
+
+    # Extract BW FEN as before
+    grayscale_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    grayscale_image = cv2.resize(grayscale_image, (480, 480))
+    color_image = cv2.resize(frame, (480, 480))
+    step = 60
+    predictions = []
+
+    for row in range(8):
+        row_data = []
+        for col in range(8):
+            square_gray = grayscale_image[
+                row * step : (row + 1) * step, col * step : (col + 1) * step
+            ]
+            square_color = color_image[
+                row * step : (row + 1) * step, col * step : (col + 1) * step
+            ]
+
+            hog_features = extract_hog_features(square_gray)
+            is_occupied = hog_model.predict([hog_features])[0]
+
+            if is_occupied == 0:
+                row_data.append("1")
+                continue
+
+            hsv_features = extract_hsv_features(square_color)
+            piece_color = hsv_model.predict([hsv_features])[0]
+            label = "w" if piece_color == 1 else "b"
+            row_data.append(label)
+
+        # Convert row to compressed FEN notation
+        fen_row = "".join(row_data)
+        compact_fen_row = ""
+        count = 0
+
+        for char in fen_row:
+            if char == "1":
+                count += 1
+            else:
+                if count > 0:
+                    compact_fen_row += str(count)
+                    count = 0
+                compact_fen_row += char
+        if count > 0:
+            compact_fen_row += str(count)
+
+        predictions.append(compact_fen_row)
+
+    bw_fen = "/".join(predictions)
+
+    # Check if BW FEN has changed before updating the full FEN
+    if bw_fen != last_bw_fen:
+        print(f"New BW FEN detected: {bw_fen}")
+        last_bw_fen = bw_fen  # Update last extracted BW FEN
+        previous_full_fen = update_fen_from_bw(bw_fen)  # Update real FEN
+        print(previous_full_fen)
+    else:
+        print("No changes in BW FEN. Keeping previous FEN.")
+
+    fen_result = bw_fen  # Keep returning BW notation for backward compatibility
+    return color_image, bw_fen
+
+
+# Existing endpoints remain exactly the same
 @app.get("/video_feed")
 async def video_feed():
     return StreamingResponse(
@@ -262,7 +312,6 @@ async def start_calibration():
     return {"message": "Calibration complete!"}
 
 
-# Endpoint to get FEN result
 @app.get("/get_fen")
 async def get_fen():
     global fen_result
@@ -276,6 +325,13 @@ async def toggle_fen_extraction():
     return {
         "message": f"FEN extraction {'activated' if fen_extraction_active else 'deactivated'}"
     }
+
+
+# New endpoint for full FEN
+@app.get("/get_full_fen")
+async def get_full_fen():
+    global previous_full_fen
+    return {"full_fen": previous_full_fen}
 
 
 @app.get("/")

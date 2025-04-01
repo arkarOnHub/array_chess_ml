@@ -35,6 +35,13 @@
             font-size: 18px;
             font-family: monospace;
         }
+        #full-fen-result {
+            margin-top: 10px;
+            font-size: 18px;
+            font-family: monospace;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
@@ -47,7 +54,8 @@
         <button onclick="toggleFenExtraction()">Start Prediction</button>
     </div>
 
-    <p id="fen-result">FEN: </p>
+    <p id="fen-result">BW Notation: </p>
+    <p id="full-fen-result">Full FEN: </p>
 
     <script>
         async function startCalibration() {
@@ -68,11 +76,15 @@
             alert(result.message);
         }
 
-        // Fetch FEN result periodically
+        // Fetch both FEN results periodically
         setInterval(async () => {
-            const response = await fetch("/get_fen");
-            const result = await response.json();
-            document.getElementById("fen-result").innerText = `FEN: ${result.fen}`;
+            const bwResponse = await fetch("/get_fen");
+            const bwResult = await bwResponse.json();
+            document.getElementById("fen-result").innerText = `BW Notation: ${bwResult.fen}`;
+            
+            const fullResponse = await fetch("/get_full_fen");
+            const fullResult = await fullResponse.json();
+            document.getElementById("full-fen-result").innerText = `Full FEN: ${fullResult.full_fen}`;
         }, 2000);
     </script>
 </body>
